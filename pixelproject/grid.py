@@ -2,7 +2,7 @@
 #
 
 import numpy as np
-UNIT_SQUATE = np.asarray([[0,0],[0,1],[1,1],[1,0]])
+UNIT_SQUARE = np.asarray([[0,0],[0,1],[1,1],[1,0]])-0.5
 
 from propobject import BaseObject
 from shapely import geometry
@@ -52,6 +52,7 @@ class GridProjector( BaseObject ):
     # -------------- #
     def project_data(self, data, as_serie=True):
         """ Use gridinteresect 
+
         Parameters
         ----------
         data: [ndarray or string or pandas.Serie]
@@ -61,23 +62,10 @@ class GridProjector( BaseObject ):
             - string: name of a gridin column (pandas)
             - pandas.Serie: serie that will be matched with gridin
         """
-        if type(data) == str:
-            if data not in self.gridin.geodataframe.columns:
-                raise ValueError("Unknown gridin column '%s'"%data)
-            data = self.gridin.geodataframe[data].values
-            
-        elif type(data) == pandas.Series:
-            data     = data.values
-            
-        elif len(data) != len(self.gridin):
-                raise ValueError("data given as ndarray but lengthes do not match")
-
-            
         # Calcul itself
-        projected_data = self._project_data_(data)
+        projected_data = self._project_data_( self._parse_data_(data) )
 
-        if as_serie:
-            
+        if as_serie:            
             return projected_data
 
         projected_data_array = np.zeros( len(self.gridout.geodataframe) )
@@ -88,6 +76,34 @@ class GridProjector( BaseObject ):
         """ """
         self.gridinterest["_tmp"] = data[ self.gridin.geodataframe.loc[ self.gridinterest["id_1"]].index ] * self.gridinterest["area"]
         return self.gridinterest.groupby("id_2")["_tmp"].sum()
+
+    def _parse_data_(self,data):
+        """ 
+        Parameters
+        ----------
+        data: [ndarray or string or pandas.Serie]
+            data associated to gridin that should be projected in gridout.
+            could be:
+            - ndarray: must have the same length as gridin
+            - string: name of a gridin column (pandas)
+            - pandas.Serie: serie that will be matched with gridin
+            
+        Returns
+        -------
+        ndarray
+        """
+        if type(data) == str:
+            if data not in self.gridin.geodataframe.columns:
+                raise ValueError("Unknown gridin column '%s'"%data)
+            return self.gridin.geodataframe[data].values
+            
+        elif type(data) == pandas.Series:
+            return data.values
+            
+        elif len(data) != len(self.gridin.geodataframe):
+            raise ValueError("data given as ndarray but lengthes do not match")
+        
+        return data
     # =================== #
     #   Properties        #
     # =================== #
@@ -107,14 +123,16 @@ class GridProjector( BaseObject ):
         if self._derived_properties["gridinterest"] is None:
             self._measure_gridinterest_()
         return self._derived_properties["gridinterest"]
+
+
     
 class Grid( BaseObject ):
     """ """
     PROPERTIES = ["pixels", "shape"]
     SIDE_PROPERTIES = ["indexes"]
-    DERIVED_PROPERTIES = ["geodataframe"]
+    DERIVED_PROPERTIES = ["vertices","geodataframe"]
     
-    def __init__(self, pixels, shape=UNIT_SQUATE, indexes=None):
+    def __init__(self, pixels=None, shape=UNIT_SQUARE, indexes=None):
         """ """
         if pixels is not None:
             self.set_pixels(pixels,shape=shape)
@@ -125,6 +143,37 @@ class Grid( BaseObject ):
     # =================== #
     #   Methods           #
     # =================== #
+    @staticmethod
+    def set_from(datainput):
+        """ Create a new Grid objects from the given input data:
+        
+        Parameters
+        ----------
+        datainput: [geopandas.geodataframe.GeoDataFrame or ndarray]
+            this could either be a:
+            - geodataframe (and this calls self.set_geodataframe)
+            - ndarray: if 3-shaped, this calls set_vertices ;
+                       if 2-shaped, this calls set_pixels.
+        
+        Returns
+        -------
+        Grid
+        """
+        this = Grid()
+        if type(datainput) == geopandas.geodataframe.GeoDataFrame:
+            this.set_geodataframe(datainput)
+            return this
+        if type(datainput) == np.ndarray:
+            if len(np.shape( datainput) ) == 3: # vertices
+                this.set_vertices(datainput)
+            elif len(np.shape( datainput) ) == 3: # pixels
+                this.set_pixels(datainput)
+            else:
+                raise TypeError("cannot parse the shape of the given datainput")
+            return this
+        raise TypeError("cannot parse the format of the given input")
+    
+            
     # --------- #
     #  SETTER   #
     # --------- #
@@ -162,6 +211,43 @@ class Grid( BaseObject ):
             raise ValueError("Cannot parse the given shape, must be [M,2] or [N,M,2] when N is the number of pixel and M the number of vertices")
         if update:
             self._update_geodataframe_()
+
+    def set_vertices(self, vertices, overwrite=False, **kwargs):
+        """ """
+        if not overwrite and (self.pixels is not None and self.shape is not None):
+            raise ValueError("Pixels and shape already defined. set the overwrite option to true, to update vertices")
+
+        self._derived_properties["vertices"] = np.asarray(vertices)
+        # Redefine pixels and shape
+        pixels = np.mean(self.vertices,axis=1)
+        shape = self.vertices - pixels[:,None]
+        shape_unique = np.unique(shape, axis=0)
+        if len(shape_unique)==1:
+            shape = shape_unique[0]
+
+        self.set_pixels(pixels, shape, **kwargs)
+
+    def set_geodataframe(self, geodataframe, overwrite=False):
+        """ """
+        if not overwrite and (self.pixels is not None and self.shape is not None):
+            raise ValueError("Pixels and shape already defined. set the overwrite option to true, to update geodataframe")
+
+        if "geometry" not in geodataframe.columns:
+            raise TypeError("The given geodataframe does not have 'geometry' column. It is required")
+        
+        self._derived_properties["geodataframe"] = geodataframe
+        
+        if "id" not in geodataframe.columns:
+            self.geodataframe["id"] = self.indexes if self.pixels is not None else np.arange( len(geodataframe) )
+
+        # - get the vertices:
+        def get_verts(poly_):
+            return np.stack(poly_.exterior.xy).T[:-1]
+        
+        vertices = np.stack( geodataframe["geometry"].apply(get_verts).values )
+        self.set_vertices(vertices, update=False) # don't update the geodataframe
+        
+        
     # --------- #
     #  UPDATE   #
     # --------- #
@@ -216,6 +302,8 @@ class Grid( BaseObject ):
     @property
     def shape(self):
         """ """
+        if self._properties["shape"] is None:
+            self._properties["shape"] = UNIT_SQUARE
         return self._properties["shape"]
 
     # -- Side
@@ -231,7 +319,9 @@ class Grid( BaseObject ):
     @property
     def vertices(self):
         """ """
-        return self.pixels[:,None]+self.shape
+        if self._derived_properties["vertices"] is None and (self.pixels is not None and self.shape is not None):
+            self._derived_properties["vertices"] = self.pixels[:,None]+self.shape
+        return self._derived_properties["vertices"]
         
     @property
     def is_shape_unique(self):
