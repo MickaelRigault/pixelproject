@@ -31,6 +31,8 @@ Let's see how the grid looks like
 ```python
 g1.show()
 ```
+![](examples/g1.png)
+
 
 _**Some details**: [`Shapely`](https://shapely.readthedocs.io/en/stable/project.html) is used to defined each individual pixel shape. All pixels are combined into a [`geopandas`](https://github.com/geopandas/geopandas) DataFrame._
 
@@ -63,6 +65,8 @@ shape_rot   = np.dot((grid.UNIT_SQUATE-np.asarray([0.5,0.5])),rotmat)+np.asarray
 g2 = grid.Grid(pixel_coords2, shape_rot)
 ```
 
+![](examples/g2.png)
+
 Now, let's see how these two grid overlap, while displaying the newly added `datain` to `g1`:
 ```python
 import matplotlib.pyplot as plt
@@ -71,7 +75,7 @@ ax = fig.add_subplot(111)
 g1.show("datain",ax=ax)
 g2.show(ax=ax)
 ```
-
+![](examples/g1_g2.png)
 #### Load the GridProjector object
 
 To project data associated to the first grid into the second grid, you simply need to load a `GridProjector` object:
@@ -92,4 +96,4 @@ datain_to_g2_array = mergedgrid.project_data("datain", as_serie=False)
 g2.add_data(datain_to_g2_array, "dataproj")
 g2.show("dataproj")
 ```
-
+![](examples/g2proj.png)
