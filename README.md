@@ -65,8 +65,6 @@ shape_rot   = np.dot((grid.UNIT_SQUATE-np.asarray([0.5,0.5])),rotmat)+np.asarray
 g2 = grid.Grid(pixel_coords2, shape_rot)
 ```
 
-![](examples/g2rot.png)
-
 Now, let's see how these two grid overlap, while displaying the newly added `datain` to `g1`:
 ```python
 import matplotlib.pyplot as plt
