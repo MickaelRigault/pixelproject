@@ -127,7 +127,7 @@ class GridProjector( BaseObject ):
 
     
 class Grid( BaseObject ):
-    """ """
+    
     PROPERTIES = ["pixels", "shape"]
     SIDE_PROPERTIES = ["indexes"]
     DERIVED_PROPERTIES = ["vertices","geodataframe"]
@@ -145,7 +145,7 @@ class Grid( BaseObject ):
     # =================== #
     @staticmethod
     def set_from(datainput):
-        """ Create a new Grid objects from the given input data:
+        """ Creates a new Grid objects from the given input data:
         
         Parameters
         ----------
@@ -178,7 +178,22 @@ class Grid( BaseObject ):
     #  SETTER   #
     # --------- #
     def set_indexes(self, indexes, update=True):
-        """ """
+        """ provide the indexes associated to each pixels
+
+        Parameters
+        ----------
+        indexes: [ndarray]
+           indexes associated to the pixels. 
+           This should have the length equal to th number of pixels (if any).
+
+        update: [bool] -optional-
+           should the geodataframe be updated ?
+           [use True if you are not sure]
+
+        Returns
+        -------
+        Void
+        """
         if self.pixels is not None and len(indexes)[0] != self.npixels:
             raise AssertionError("not the same number of indexes as the number of pixels")
         self._side_properties["indexes"]  = indexes
@@ -186,7 +201,11 @@ class Grid( BaseObject ):
             self._update_geodataframe_()
         
     def set_pixels(self, pixels, shape=None, update=True):
-        """ """
+        """ provide the pixels. 
+        
+        Pixels define the position up on which the geometries are defined.
+        NB: vertices = pixels+shape
+        """
         # Setting the pixels
         if np.shape(pixels)[-1] != 2:
             raise ValueError("pixels must be [N,2] arrays")
