@@ -37,13 +37,13 @@ class GridProjector( BaseObject ):
     def _measure_gridinterest_(self):
         """ """
         # -- internal -- #        
-        def localdef_get_area(g):
-            return g.area
+        def localdef_get_area(l):
+            return l.geometry.area/self.gridin.geodataframe.iloc[l.id_1].geometry.area
         # -------------- #
         
         if self.gridin is not None and self.gridout is not None:
             self._derived_properties["gridinterest"] = geopandas.overlay(self.gridin.geodataframe, self.gridout.geodataframe, how='intersection')
-            self.gridinterest["area"] = self.gridinterest["geometry"].apply(localdef_get_area)
+            self.gridinterest["area"] = self.gridinterest.apply(localdef_get_area, axis=1)
         else:
             warnings.warn("Cannot measure gridinterest, because gridin and/or gridout is/are None")
 
@@ -273,9 +273,11 @@ class Grid( BaseObject ):
     def _update_geodataframe_(self):
         """ """
         dataseries = self.get_geoseries()
+        x,y     = self.pixels.T
         self._derived_properties["geodataframe"] = \
           geopandas.GeoDataFrame({'geometry': dataseries,
-                                        'id':self.indexes})
+                                        'id':self.indexes,
+                                  'x':x,'y':y})
         
     def add_data(self, data, name, indexes=None, inplace=True):
         """ """
@@ -293,7 +295,45 @@ class Grid( BaseObject ):
         """ """
         import geopandas
         return geopandas.GeoSeries([geometry.Polygon(v) for v in self.vertices])
-    
+
+    # --------- #
+    # Project   #
+    # --------- #
+    def project_to_wcs(self, wcs_, as_grid=True, **kwargs):
+        """ provide an astropy.wcs.WCS and this will project 
+        the current grid into it (assuming grid's vertices coordinates are in pixels) 
+
+        Parameters
+        ----------
+        wcs_: [astropy.wcs.WCS]
+            The world coordinate solution
+
+        as_grid: [bool] -optional-
+            Should this return a load Grid object or an array of vertices (in degree)
+            
+        **kwargs goes to wcs_.all_pix2world
+
+        Returns
+        -------
+        Grid or array (see as_grid)
+
+        """
+        verts             = self.vertices
+        verts_shape       = np.shape(verts)
+        flatten_verts     = np.concatenate(verts, axis=0)
+        # 
+        flatten_verts_wcs = np.asarray(wcs_.all_pix2world(flatten_verts[:,0],
+                                                          flatten_verts[:,1], 0,
+                                                          **kwargs)).T
+        
+        #
+        verts_wcs = flatten_verts_wcs.reshape(verts_shape)
+        if not as_grid:
+            return verts_wcs
+
+        g_wcs = Grid.set_from(verts_wcs)
+        g_wcs.geodataframe["x_pix"],g_wcs.geodataframe["y_pix"] = self.pixels.T
+        return g_wcs
     # --------- #
     #  PLOTTER  #
     # --------- #
@@ -301,7 +341,8 @@ class Grid( BaseObject ):
         """ """
         if column is not None:
             facecolor=None
-        return self.geodataframe.plot(column, ax=ax,facecolor=facecolor,edgecolor=edgecolor, **kwargs)
+        return self.geodataframe.plot(column, ax=ax,facecolor=facecolor,
+                                          edgecolor=edgecolor, **kwargs)
 
 
     
