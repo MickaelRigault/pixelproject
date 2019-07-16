@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 #
 
+import warnings
 import numpy as np
 UNIT_SQUARE = np.asarray([[0,0],[0,1],[1,1],[1,0]])-0.5
 
@@ -173,7 +174,6 @@ class Grid( BaseObject ):
             return this
         raise TypeError("cannot parse the format of the given input")
     
-            
     # --------- #
     #  SETTER   #
     # --------- #
@@ -334,6 +334,60 @@ class Grid( BaseObject ):
         g_wcs = Grid.set_from(verts_wcs)
         g_wcs.geodataframe["x_pix"],g_wcs.geodataframe["y_pix"] = self.pixels.T
         return g_wcs
+
+
+    def evaluate(self, func, vectorized=True):
+        """ Evaluate the given function throughout the grid.
+        This evulation is using polynome triangulation to integrate the 
+        given function inside the polyname using triangle integration.
+        
+        -> dependency: the integration is made using quadpy.
+
+        Examples:
+        # Remark the np.stack(x, axis=-1). 
+        # This is mandatory since integration is going to send 
+        #  x = [ [[....],[...]], [[....],[...]], ... ] for triangles
+        ```python
+        def get_2dgauss(x, mu=[4,4], cov=[[1,0],[0,2]]):
+            """ """
+            return stats.multivariate_normal.pdf(np.stack(x, axis=-1), mean=mu, cov=cov)
+        ```
+
+        """
+        try:
+            import quadpy
+        except ImportError:
+            raise ImportError("Integration is made using quadpy. pip install quadpy")
+
+        # Is Triangulation made ?
+        if "triangles" not in self.geodataframe.columns:
+            warnings.warn("triangles not defined: deriving triangulation.")
+            self.derive_triangulation()
+            
+        # Let's get the triangles
+        trs = np.stack(self.geodataframe["triangles"].values)
+        shape_trs = np.shape(trs)
+        
+        if len(shape_trs)==4 and vectorized: # All Polygon have the same topology (same amount of vertices)
+            tr_flat = np.stack(np.concatenate(trs, axis=0), axis=-2)
+            val = quadpy.triangle.strang_fix_cowper_09().integrate(func,tr_flat).reshape(shape_trs[:2])
+        else:
+            val = np.asarray([quadpy.triangle.strang_fix_cowper_09().integrate(func,np.stack(t_, axis=-2)) for t_ in trs])
+
+        return np.sum(val, axis=1)
+        
+        
+        
+    def derive_triangulation(self):
+        """ """
+        def triangulate(geom):
+            """ Return triangulate format that quadpy likes """
+            from shapely import ops
+            triangles = ops.triangulate(geom)
+            return np.stack([np.asarray(t.exterior.coords.xy).T[:-1] for t in triangles])
+        
+        self.geodataframe["triangles"] = self.geodataframe["geometry"].apply(triangulate)
+
     # --------- #
     #  PLOTTER  #
     # --------- #
