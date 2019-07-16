@@ -95,3 +95,43 @@ g2.add_data(datain_to_g2_array, "dataproj")
 g2.show("dataproj")
 ```
 ![](examples/g2proj.png)
+
+# Evaluate a 2D functin through the grid
+
+Let's evaluate a gaussian 2D on a rotated grid:
+
+```python
+from numpy as np
+from pixelproject import grid
+import quadpy
+
+theta         = 30 *np.pi/180
+centroid      = [10,10]
+rotmat        = np.asarray([[np.cos(theta), np.sin(theta)],[-np.sin(theta), np.cos(theta)]])
+
+pixels_flat = np.concatenate(np.mgrid[0:20,0:20].T, axis=0)
+pixels_rot = np.dot((pixels_flat-np.asarray(centroid)),rotmat)+np.asarray(centroid)
+shape_rot   = np.dot((grid.UNIT_SQUARE),rotmat)
+
+# -> The grid
+g1 = grid.Grid(pixels_rot, shape_rot)
+
+# -> The 2D function
+from scipy import stats
+def get_2dgauss(x, mu=[10.3,9.1], cov=[[1.3,0],[0,2.1]]):
+    """ """
+    # Be careful with the np.stack here. The format is tricky
+    return stats.multivariate_normal.pdf(np.stack(x, axis=-1), mean=mu, cov=cov)
+
+# Measure the triangulation
+g1.derive_triangulation() # made automatically in evaluate if needed though.
+
+# Evaluate the 2D function
+gaus = g1.evaluate(get_2dgauss)
+
+# Add it to the grid's geodataframe and show it
+g1.add_data(gaus, "gauss")
+
+g1.show("gauss")
+```
+![](examples/gevaluate.png)
