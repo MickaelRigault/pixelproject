@@ -129,9 +129,9 @@ class GridProjector( BaseObject ):
     
 class Grid( BaseObject ):
     
-    PROPERTIES = ["pixels", "shape"]
-    SIDE_PROPERTIES = ["indexes"]
-    DERIVED_PROPERTIES = ["vertices","geodataframe"]
+    PROPERTIES         = ["pixels", "shape"]
+    SIDE_PROPERTIES    = ["indexes"]
+    DERIVED_PROPERTIES = ["vertices","geodataframe", "triangulation"]
     
     def __init__(self, pixels=None, shape=UNIT_SQUARE, indexes=None):
         """ """
@@ -292,10 +292,14 @@ class Grid( BaseObject ):
     #  GETTER   #
     # --------- #
     def get_geoseries(self):
-        """ """
+        """ build a new geodataframe and returns it. """
         import geopandas
         return geopandas.GeoSeries([geometry.Polygon(v) for v in self.vertices])
 
+    def get_triangulation_grid(self):
+        """ Returns a grid of triangulation. """
+        return Grid.set_from( np.concatenate(self.triangulation, axis=0) )
+    
     # --------- #
     # Project   #
     # --------- #
@@ -360,12 +364,12 @@ class Grid( BaseObject ):
             raise ImportError("Integration is made using quadpy. pip install quadpy")
 
         # Is Triangulation made ?
-        if "triangles" not in self.geodataframe.columns:
+        if self._derived_properties["triangulation"] is None:
             warnings.warn("triangles not defined: deriving triangulation.")
             self.derive_triangulation()
             
         # Let's get the triangles
-        trs = np.stack(self.geodataframe["triangles"].values)
+        trs = np.stack(self.triangulation)
         shape_trs = np.shape(trs)
         
         if len(shape_trs)==4 and vectorized: # All Polygon have the same topology (same amount of vertices)
@@ -376,17 +380,19 @@ class Grid( BaseObject ):
 
         return np.sum(val, axis=1)
         
-        
-        
-    def derive_triangulation(self):
+    def derive_triangulation(self, fast_unique=True):
         """ """
+        
         def triangulate(geom):
             """ Return triangulate format that quadpy likes """
             from shapely import ops
             triangles = ops.triangulate(geom)
             return np.stack([np.asarray(t.exterior.coords.xy).T[:-1] for t in triangles])
-        
-        self.geodataframe["triangles"] = self.geodataframe["geometry"].apply(triangulate)
+
+        if not self.is_shape_unique or not fast_unique:
+            self._derived_properties["triangulation"] = self.geodataframe["geometry"].apply(triangulate)
+        else:
+            self._derived_properties["triangulation"] = self.pixels[:,None,None] + triangulate(geometry.Polygon(self.shape))
 
     # --------- #
     #  PLOTTER  #
@@ -397,8 +403,6 @@ class Grid( BaseObject ):
             facecolor=None
         return self.geodataframe.plot(column, ax=ax,facecolor=facecolor,
                                           edgecolor=edgecolor, **kwargs)
-
-
     
     # =================== #
     #   Properties        #
@@ -448,3 +452,10 @@ class Grid( BaseObject ):
         if self._derived_properties["geodataframe"] is None:
             self._update_geodataframe_()
         return self._derived_properties["geodataframe"]
+    
+    @property
+    def triangulation(self):
+        """ Triangulation of the vertices. Based on Delaunay tesselation, see shapely.ops.triangulate """
+        if self._derived_properties["triangulation"] is None:
+            self.derive_triangulation()
+        return self._derived_properties["triangulation"]

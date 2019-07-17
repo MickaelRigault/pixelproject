@@ -11,7 +11,7 @@ MAINTAINER_EMAIL = 'm.rigault@ipnl.in2p3.fr'
 URL = 'https://github.com/MickaelRigault/pixelproject/'
 LICENSE = 'Apache 2.0'
 DOWNLOAD_URL = 'https://github.com/MickaelRigault/pixelproject/tarball/0.1'
-VERSION = '0.1.3'
+VERSION = '0.1.4'
 
 try:
     from setuptools import setup, find_packages
