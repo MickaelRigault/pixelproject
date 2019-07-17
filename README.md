@@ -98,6 +98,8 @@ g2.show("dataproj")
 
 # Evaluate a 2D functin through the grid
 
+The integration of an analytic 2D function inside the grid is made using triangle integration. This is based on the [`quadpy`](https://github.com/nschloe/quadpy) library.  
+
 Let's evaluate a gaussian 2D on a rotated grid:
 
 ```python
