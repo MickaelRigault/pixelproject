@@ -10,8 +10,41 @@ from shapely import geometry
 import pandas
 import geopandas
 
-class GridProjector( BaseObject ):
+# ======================= #
+#                         #
+#    Functions            #
+#                         #
+# ======================= #
 
+def get_simple_grid(xbounds, ybounds, shift_origin=None):
+    """ """
+    xbounds = np.atleast_1d(xbounds)
+    if len(xbounds)==1:
+        xmin,xmax = 0,xbounds[0]
+    else:
+        xmin,xmax = xbounds
+        
+    ybounds = np.atleast_1d(ybounds)
+    if len(ybounds)==1:
+        ymin,ymax = 0,ybounds[0]
+    else:
+        ymin,ymax = ybounds
+
+    pixels  = np.mgrid[xmin:xmax,ymin:ymax]
+    pixels2_flat = np.concatenate(pixels.T, axis=0)
+    if shift_origin is not None:
+        # not += because conflict between int and float array
+        pixels2_flat = pixels2_flat+ shift_origin 
+    return Grid(pixels2_flat, UNIT_SQUARE)
+
+# ======================= #
+#                         #
+#    Classes              #
+#                         #
+# ======================= #
+
+class GridProjector( BaseObject ):
+    """ """
     PROPERTIES = ["gridin", "gridout"]
     DERIVED_PROPERTIES = ["gridinterest"]
     
@@ -43,7 +76,12 @@ class GridProjector( BaseObject ):
         # -------------- #
         
         if self.gridin is not None and self.gridout is not None:
-            self._derived_properties["gridinterest"] = geopandas.overlay(self.gridin.geodataframe, self.gridout.geodataframe, how='intersection')
+            #
+            # Most likely there is a faster method if is_shape_unique
+            #
+            self._derived_properties["gridinterest"] = geopandas.overlay(self.gridin.geodataframe,
+                                                                         self.gridout.geodataframe,
+                                                                         how='intersection')
             self.gridinterest["area"] = self.gridinterest.apply(localdef_get_area, axis=1)
         else:
             warnings.warn("Cannot measure gridinterest, because gridin and/or gridout is/are None")
@@ -51,7 +89,7 @@ class GridProjector( BaseObject ):
     # -------------- #
     #  Measurement   #
     # -------------- #
-    def project_data(self, data, as_serie=True):
+    def project_data(self, data, as_serie=True, use="sum"):
         """ Use gridinteresect 
 
         Parameters
@@ -64,7 +102,7 @@ class GridProjector( BaseObject ):
             - pandas.Serie: serie that will be matched with gridin
         """
         # Calcul itself
-        projected_data = self._project_data_( self._parse_data_(data) )
+        projected_data = self._project_data_(self._parse_data_(data), use=use)
 
         if as_serie:            
             return projected_data
@@ -73,10 +111,12 @@ class GridProjector( BaseObject ):
         projected_data_array[projected_data.index.values] = projected_data.values
         return projected_data_array
         
-    def _project_data_(self, data):
+    def _project_data_(self, data, use="sum"):
         """ """
-        self.gridinterest["_tmp"] = data[ self.gridin.geodataframe.loc[ self.gridinterest["id_1"]].index ] * self.gridinterest["area"]
-        return self.gridinterest.groupby("id_2")["_tmp"].sum()
+        self.gridinterest["_tmp"] = data[ self.gridin.geodataframe.loc[ self.gridinterest["id_1"]].index
+                                        ] * self.gridinterest["area"]
+        
+        return getattr(self.gridinterest.groupby("id_2")["_tmp"],use)()
 
     def _parse_data_(self,data):
         """ 
@@ -144,8 +184,50 @@ class Grid( BaseObject ):
     # =================== #
     #   Methods           #
     # =================== #
-    @staticmethod
-    def set_from(datainput):
+    @classmethod
+    def from_stamps(cls, stamp, origin=[0,0]):
+        """ stamps are 2d array, something you could to ax.imshow(stamps) 
+        data will be stored as 'data' in the grid's dataframe
+        """
+        this = get_simple_grid(*np.shape(stamp), shift_origin=origin)
+        this.add_data(np.ravel(stamp), "data")
+        return this
+
+    @classmethod
+    def from_vertices(cls, vertices, indexes=None):
+        """ directly provide the vertices
+
+        Parameters:
+        -----------
+        vertices: [list of array or dictionary]
+            The vertices of all the grid entries. 
+            Could have two format:
+            - list of array: [[vert_1],[vert_2],....], then you may want to provide indexes
+            - dictionary: {id_1:vert_1,id_2: vert_2, ...} 
+            if a dictionary is provided, the indexes will be set by the vertices.
+
+        indexes: [list or None] -optional-
+            (Ignored if vertices is a dict)
+            If you provide vertices as a list of vertices, you can provide the
+            indexes of each of the vertices. 
+            -> if None, then indexes = np.arange(len(vertices))
+
+        Returns
+        -------
+        Grid
+        """
+        this = cls()
+        if type(vertices) is dict:
+            indexes, vertices = list(vertices.keys()), list(vertices.values())
+            
+        this.set_vertices(vertices)
+        if indexes is not None:
+            this.set_indexes(indexes)
+            
+        return this
+        
+    @classmethod
+    def set_from(cls, datainput):
         """ Creates a new Grid objects from the given input data:
         
         Parameters
@@ -153,6 +235,7 @@ class Grid( BaseObject ):
         datainput: [geopandas.geodataframe.GeoDataFrame or ndarray]
             this could either be a:
             - geodataframe (and this calls self.set_geodataframe)
+            - geoSeries
             - ndarray: if 3-shaped, this calls set_vertices ;
                        if 2-shaped, this calls set_pixels.
         
@@ -160,10 +243,11 @@ class Grid( BaseObject ):
         -------
         Grid
         """
-        this = Grid()
+        this = cls()
         if type(datainput) == geopandas.geodataframe.GeoDataFrame:
             this.set_geodataframe(datainput)
             return this
+        
         if type(datainput) == np.ndarray:
             if len(np.shape( datainput) ) == 3: # vertices
                 this.set_vertices(datainput)
@@ -194,7 +278,7 @@ class Grid( BaseObject ):
         -------
         Void
         """
-        if self.pixels is not None and len(indexes)[0] != self.npixels:
+        if self.pixels is not None and len(indexes) != self.npixels:
             raise AssertionError("not the same number of indexes as the number of pixels")
         self._side_properties["indexes"]  = indexes
         if update:
@@ -236,14 +320,20 @@ class Grid( BaseObject ):
         if not overwrite and (self.pixels is not None and self.shape is not None):
             raise ValueError("Pixels and shape already defined. set the overwrite option to true, to update vertices")
 
+        try:
+            pixels = np.mean(vertices, axis=1)
+        except:
+            # Means vertices have different size.
+            self._derived_properties["vertices"] = vertices
+            pixels = np.asarray([np.mean(v_, axis=0) for v_ in vertices])
+            self.set_pixels(pixels, None, **kwargs)
+            return
+
         self._derived_properties["vertices"] = np.asarray(vertices)
-        # Redefine pixels and shape
-        pixels = np.mean(self.vertices,axis=1)
         shape = self.vertices - pixels[:,None]
         shape_unique = np.unique(shape, axis=0)
         if len(shape_unique)==1:
             shape = shape_unique[0]
-
         self.set_pixels(pixels, shape, **kwargs)
 
     def set_geodataframe(self, geodataframe, overwrite=False):
@@ -263,8 +353,10 @@ class Grid( BaseObject ):
         def get_verts(poly_):
             return np.stack(poly_.exterior.xy).T[:-1]
         
-        vertices = np.stack( geodataframe["geometry"].apply(get_verts).values )
+        vertices = geodataframe["geometry"].apply(get_verts).values
         self.set_vertices(vertices, update=False) # don't update the geodataframe
+
+    
         
         
     # --------- #
@@ -299,11 +391,66 @@ class Grid( BaseObject ):
     def get_triangulation_grid(self):
         """ Returns a grid of triangulation. """
         return Grid.set_from( np.concatenate(self.triangulation, axis=0) )
+
+    def get_pixels_in(self, polygon, invert=False):
+        """ checks if the centroid of the pixel is in or out the given shapely polygon.
+        
+        Parameters
+        ----------
+        polygon: [shapely.geometry]
+            reference polygon 
+
+        invert: [bool] -optional-
+            Get the pixel inside the polygon [invert=False] or outsite [invert=True]
+
+        Returns
+        -------
+        list of pixels and boolean mask
+        """
+        from shapely import vectorized
+        flagin = vectorized.contains(polygon, *self.pixels.T)
+        if invert:
+            flagin = ~flagin
+        return self.pixels[flagin], flagin
     
+        
     # --------- #
     # Project   #
     # --------- #
-    def project_to_wcs(self, wcs_, as_grid=True, **kwargs):
+    def project_to(self, othergrid, column="*", asgrid=True, use="sum"):
+        """ project data in the given grid
+
+        Parameters
+        ----------
+        othergrid: [Grid]
+            New grid where data should be projected to
+            
+        column: [str/None/list of] -optional-
+            Which data should be projected ? 
+            If None or '*' all the non-structural columns will be
+            (structural columns are 'geometry', 'id', 'x', 'y')
+
+        asgrid: [bool] -optional-
+            Should this return a new Grid (actually same object as othergrid)
+            or a dict [asgrid=False]?
+
+        Returns
+        -------
+        Grid or dict (see asgrid)
+        """
+        gproj = GridProjector(self, othergrid)
+        if column is None or column in ["*","all"]:
+            column = [k for k in self.geodataframe if k not in ['geometry', 'id', 'x', 'y']]
+        datas = {k:gproj.project_data(k, use=use) for k in column}
+        if not asgrid:
+            return datas
+        # building and setting the new grid
+        gout = othergrid.__class__.set_from(othergrid.geodataframe)
+        for k in column:
+            gout.add_data(datas[k],k)
+        return gout
+    
+    def project_to_wcs(self, wcs_, asgrid=True, **kwargs):
         """ provide an astropy.wcs.WCS and this will project 
         the current grid into it (assuming grid's vertices coordinates are in pixels) 
 
@@ -312,14 +459,14 @@ class Grid( BaseObject ):
         wcs_: [astropy.wcs.WCS]
             The world coordinate solution
 
-        as_grid: [bool] -optional-
+        asgrid: [bool] -optional-
             Should this return a load Grid object or an array of vertices (in degree)
             
         **kwargs goes to wcs_.all_pix2world
 
         Returns
         -------
-        Grid or array (see as_grid)
+        Grid or array (see asgrid)
 
         """
         verts             = self.vertices
@@ -332,7 +479,7 @@ class Grid( BaseObject ):
         
         #
         verts_wcs = flatten_verts_wcs.reshape(verts_shape)
-        if not as_grid:
+        if not asgrid:
             return verts_wcs
 
         g_wcs = Grid.set_from(verts_wcs)
